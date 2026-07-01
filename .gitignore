@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 输出目录（运行结果，每次可重新生成）
+output/
+
+# 框架参考文件（不属于项目代码）
+skills-main/
+superpowers-main/
+
+# 临时文件
+_docx_extracted.txt
+
+# 虚拟环境
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,231 @@
+"""端到端无线通信 Pipeline 编排模块。
+
+将发射机、信道和接收机各模块串联，实现完整的文件传输仿真链路。
+"""
+
+import numpy as np
+import json
+from pathlib import Path
+from typing import Optional
+
+from src.config import WirelessConfig
+from src.source_coder import text_to_bits, bits_to_text
+from src.scrambler import scramble, descramble
+from src.channel_coder import ConvolutionalEncoder, ViterbiDecoder
+from src.frame import FramePacker, FrameUnpacker
+from src.qpsk import qpsk_modulate, qpsk_demodulate_hard
+from src.awgn import awgn_channel
+from src.synchronizer import FrameSynchronizer
+from src.metrics import compute_ber, compute_fer, compute_text_recovery_rate
+
+
+class WirelessPipeline:
+    """无线通信基带仿真 Pipeline。
+
+    串联完整的发射→信道→接收链路。
+    """
+
+    def __init__(self, config: Optional[WirelessConfig] = None):
+        """
+        Args:
+            config: 系统配置。None 时使用默认配置。
+        """
+        self.config = config or WirelessConfig()
+        cfg = self.config
+
+        # 发射机模块
+        self.encoder = ConvolutionalEncoder(
+            constraint_length=cfg.constraint_length,
+            generators=cfg.generator_polynomials,
+        )
+        self.packer = FramePacker(
+            sync_word=cfg.sync_word,
+            payload_bits=cfg.frame_payload_bits,
+        )
+
+        # 接收机模块
+        self.decoder = ViterbiDecoder(
+            constraint_length=cfg.constraint_length,
+            generators=cfg.generator_polynomials,
+        )
+        self.unpacker = FrameUnpacker(
+            sync_word=cfg.sync_word,
+            payload_bits=cfg.frame_payload_bits,
+        )
+
+        # 帧同步参数
+        sw_len = len(cfg.sync_word)
+        frame_total_bits = sw_len + 16 + cfg.frame_payload_bits
+        assert frame_total_bits % 2 == 0, \
+            f"Frame total bits must be even, got {frame_total_bits}"
+        self._frame_sym_len = frame_total_bits // 2
+        self.synchronizer = FrameSynchronizer(
+            sync_word=cfg.sync_word,
+            frame_length_symbols=self._frame_sym_len,
+            threshold_factor=cfg.sync_threshold_factor,
+        )
+
+    def run(
+        self,
+        input_path: str,
+        output_dir: str,
+        snr_db: float = None,
+        seed: int = None,
+        sync_offset: int = None,
+    ) -> dict:
+        """运行完整的端到端仿真。
+
+        Args:
+            input_path: 输入文本文件路径。
+            output_dir: 输出目录路径。
+            snr_db: Es/N0 信噪比 (dB)。None 时使用默认配置。
+            seed: 随机数种子。None 时使用默认配置。
+            sync_offset: 同步偏移（符号数）。None 时使用默认配置。
+
+        Returns:
+            metrics 字典，包含 BER、FER、text_recovery_rate 等。
+        """
+        cfg = self.config
+        snr_db = snr_db if snr_db is not None else cfg.default_snr_db
+        seed = seed if seed is not None else cfg.default_seed
+        sync_offset = sync_offset if sync_offset is not None else cfg.sync_offset
+
+        out_path = Path(output_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+
+        # ==================== 发射机 ====================
+
+        # 1. 信源编码
+        tx_bits, metadata = text_to_bits(input_path)
+
+        # 2. 加扰
+        tx_scrambled = scramble(tx_bits, seed=(seed & 0x7F))
+
+        # 空输入：直接复制文件
+        if len(tx_bits) == 0:
+            import shutil
+            shutil.copy(input_path, str(out_path / 'received.txt'))
+            return {
+                'ber': 0.0, 'fer': 0.0, 'text_recovery_rate': 1.0,
+                'total_bits': 0, 'bit_errors': 0, 'frame_errors': 0,
+                'snr_db': snr_db,
+            }
+
+        # 3. 信道编码
+        tx_encoded = self.encoder.encode(tx_scrambled)
+
+        # 4. 帧封装
+        frames = self.packer.pack(tx_encoded)
+        all_tx_bits = np.concatenate(frames)
+
+        # 5. QPSK 调制
+        tx_symbols = qpsk_modulate(all_tx_bits)
+
+        # ==================== 信道 ====================
+
+        # 6. AWGN 信道
+        rx_symbols = awgn_channel(tx_symbols, snr_db=snr_db, seed=seed)
+
+        # 7. 添加同步偏移
+        if sync_offset > 0:
+            offset_noise = (
+                np.random.RandomState(seed + 1).randn(sync_offset) +
+                1j * np.random.RandomState(seed + 1).randn(sync_offset)
+            ) * 0.01
+            rx_symbols = np.concatenate([offset_noise, rx_symbols])
+
+        # ==================== 接收机 ====================
+
+        # 8. 帧同步
+        frame_starts = self.synchronizer.find_frame_starts(rx_symbols)
+        rx_frames_sym = self.synchronizer.extract_frames(rx_symbols, frame_starts)
+
+        if not rx_frames_sym:
+            # 同步失败：无法恢复
+            return {
+                'ber': 0.5, 'fer': 1.0, 'text_recovery_rate': 0.0,
+                'total_bits': 0, 'bit_errors': 0, 'frame_errors': 0,
+                'snr_db': snr_db, 'sync_failed': True,
+            }
+
+        # 9. QPSK 硬解调各帧符号为比特
+        all_rx_bits = np.array([
+            qpsk_demodulate_hard(fsym) for fsym in rx_frames_sym
+        ])
+        if all_rx_bits.size > 0:
+            all_rx_bits = np.concatenate(all_rx_bits)
+
+        if len(all_rx_bits) < len(all_tx_bits):
+            all_rx_bits = np.pad(all_rx_bits, (0, len(all_tx_bits) - len(all_rx_bits)))
+        elif len(all_rx_bits) > len(all_tx_bits):
+            all_rx_bits = all_rx_bits[:len(all_tx_bits)]
+
+        # 解帧
+        rx_frames_bits = self._reshape_to_frames(all_rx_bits)
+        rx_encoded = self.unpacker.unpack(rx_frames_bits)
+
+        # 对齐编码比特长度
+        if len(rx_encoded) < len(tx_encoded):
+            rx_encoded = np.pad(rx_encoded, (0, len(tx_encoded) - len(rx_encoded)))
+        elif len(rx_encoded) > len(tx_encoded):
+            rx_encoded = rx_encoded[:len(tx_encoded)]
+
+        # 11. 信道译码
+        rx_decoded = self.decoder.decode_hard(rx_encoded)
+
+        # 12. 解扰
+        rx_descrambled = descramble(rx_decoded, seed=(seed & 0x7F))
+
+        # 13. 信源解码
+        received_path = str(out_path / 'received.txt')
+        bits_to_text(rx_descrambled, metadata, received_path)
+
+        # ==================== 指标计算 ====================
+
+        # BER
+        ber = compute_ber(tx_scrambled, rx_decoded)
+        bit_errors = int(np.sum(
+            tx_scrambled[:min(len(tx_scrambled), len(rx_decoded))] !=
+            rx_decoded[:min(len(tx_scrambled), len(rx_decoded))]
+        ))
+
+        # FER
+        num_tx_frames = len(frames)
+        fer = compute_fer(frames, rx_frames_bits)
+        frame_errors_total = int(fer * num_tx_frames)
+
+        # 文本恢复率
+        text_recovery = compute_text_recovery_rate(input_path, received_path)
+
+        min_len = min(len(tx_scrambled), len(rx_decoded))
+
+        metrics = {
+            'ber': float(ber),
+            'fer': float(fer),
+            'text_recovery_rate': float(text_recovery),
+            'total_bits': int(min_len),
+            'bit_errors': int(bit_errors),
+            'total_frames': int(num_tx_frames),
+            'frame_errors': int(frame_errors_total),
+            'snr_db': float(snr_db),
+            'seed': int(seed),
+            'sync_offset': int(sync_offset),
+        }
+
+        # 保存 metrics.json
+        metrics_path = out_path / 'metrics.json'
+        with open(metrics_path, 'w', encoding='utf-8') as f:
+            json.dump(metrics, f, indent=2, ensure_ascii=False)
+
+        return metrics
+
+    def _reshape_to_frames(self, bits: np.ndarray) -> list:
+        """将一维比特流重塑为帧列表。"""
+        frame_bits = self._frame_sym_len * 2
+        frames = []
+        pos = 0
+        while pos + frame_bits <= len(bits):
+            frames.append(bits[pos:pos + frame_bits])
+            pos += frame_bits
+        return frames
+

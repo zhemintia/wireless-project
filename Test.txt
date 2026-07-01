@@ -1,0 +1,18 @@
+Hello, Wireless Communication!
+This is a test file for the baseband simulation system.
+The goal is to transmit this file through a simulated wireless link
+and recover it perfectly at the receiver side.
+
+Technical parameters:
+- Modulation: QPSK with Gray mapping
+- Channel coding: Convolutional code (2,1,7) with Viterbi decoding
+- Synchronization: Frame-based with 32-bit sync word
+- Channel: AWGN with configurable SNR
+
+Special characters test: 1234567890!@#$%^&*()_+-=[]{}|;':",./<>?
+中文测试：无线通信基带仿真系统 — 期末项目
+日本語テスト：ワイヤレス通信
+Line 10: The quick brown fox jumps over the lazy dog.
+Line 11: THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG.
+Line 12: 0123456789 repeated: 0123456789
+Line 13: End of test file.
