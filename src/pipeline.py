@@ -128,7 +128,8 @@ class WirelessPipeline:
 
         # 7. 添加同步偏移
         if sync_offset > 0:
-            rng = np.random.RandomState(seed + 1)
+            rng_seed = (seed + 1) % (2**31)
+            rng = np.random.RandomState(rng_seed)
             offset_noise = (
                 rng.randn(sync_offset) + 1j * rng.randn(sync_offset)
             ) * 0.01
@@ -148,12 +149,12 @@ class WirelessPipeline:
                 'snr_db': snr_db, 'sync_failed': True,
             }
 
-        # 9. QPSK 硬解调各帧符号为比特
-        all_rx_bits = np.array([
-            qpsk_demodulate_hard(fsym) for fsym in rx_frames_sym
-        ])
-        if all_rx_bits.size > 0:
-            all_rx_bits = np.concatenate(all_rx_bits)
+        # 9. QPSK 硬解调各帧符号为比特（concatenate 避免 ragged array 警告）
+        rx_bits_list = [qpsk_demodulate_hard(fsym) for fsym in rx_frames_sym]
+        if rx_bits_list:
+            all_rx_bits = np.concatenate(rx_bits_list)
+        else:
+            all_rx_bits = np.array([], dtype=np.uint8)
 
         if len(all_rx_bits) < len(all_tx_bits):
             all_rx_bits = np.pad(all_rx_bits, (0, len(all_tx_bits) - len(all_rx_bits)))

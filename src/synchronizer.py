@@ -28,13 +28,14 @@ class FrameSynchronizer:
         self,
         sync_word: np.ndarray,
         frame_length_symbols: int = None,
+        payload_bits: int = 256,
         threshold_factor: float = 0.5,
     ):
         """
         Args:
             sync_word: 32-bit 同步字 (uint8 ndarray)。
-            frame_length_symbols: 每帧符号数。
-                None 时自动从 sync_word + 16 + payload_bits 推算。
+            frame_length_symbols: 每帧符号数。None 时自动推算。
+            payload_bits: 每帧载荷比特数（仅在 frame_length_symbols=None 时使用）。
             threshold_factor: 峰值检测阈值因子 (0~1)。
         """
         self.sync_word = sync_word.astype(np.uint8)
@@ -45,8 +46,8 @@ class FrameSynchronizer:
 
         # 帧长
         if frame_length_symbols is None:
-            # 默认: 32-bit 同步字 + 16-bit 长度 + 256-bit 载荷
-            frame_bits = len(sync_word) + 16 + 256
+            frame_bits = len(sync_word) + 16 + payload_bits
+            assert frame_bits % 2 == 0, f"Frame bit total {frame_bits} must be even"
             frame_length_symbols = frame_bits // 2
         self.frame_length_symbols = frame_length_symbols
 

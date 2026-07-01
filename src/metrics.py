@@ -92,8 +92,10 @@ def compute_text_recovery_rate(original_path: str, received_path: str) -> float:
         return 1.0 if not received else 0.0
 
     min_len = min(len(original), len(received))
+    max_len = max(len(original), len(received))
     matches = sum(1 for i in range(min_len) if original[i] == received[i])
-    return matches / len(original)
+    # 使用 max_len 作为分母：长度差异也视为不匹配
+    return matches / max_len if max_len > 0 else 1.0
 
 
 def plot_constellation(

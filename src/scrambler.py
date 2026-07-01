@@ -26,6 +26,7 @@ def _lfsr_scramble_bit(bit: int, state: int, poly: int) -> tuple[int, int]:
     """
     # 反馈比特 = 多项式抽头的 XOR
     # 将 state 左移 1 位后与 poly 做 AND，使 bit 7 对应 x^7 抽头
+    # ⚠ bin().count() 每次分配字符串，生产级应使用位运算 XOR folding
     feedback = bin(((state << 1) & poly)).count('1') % 2
     output = bit ^ feedback
     new_state = ((state << 1) | output) & 0x7F  # 保持 7-bit

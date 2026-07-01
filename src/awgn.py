@@ -73,6 +73,9 @@ def awgn_channel(
     if len(symbols) == 0:
         return np.array([], dtype=np.complex128)
 
+    if not np.isfinite(snr_db):
+        raise ValueError(f"SNR must be finite, got {snr_db}")
+
     noise_var = snr_db_to_noise_var(snr_db)
 
     # 每实维噪声标准差

@@ -16,7 +16,12 @@ from typing import List, Union
 
 
 class FramePacker:
-    """帧封装器：将比特流组织为带同步字的帧。"""
+    """帧封装器：将比特流组织为带同步字的帧。
+
+    ⚠ 设计局限: 长度字段为 16-bit 无保护明文，无 CRC/FEC。
+       在高噪声下长度字段可能被破坏，导致该帧不可恢复。
+       这是 SNR 9-11dB 区间 FER>0 但 BER=0 的原因。
+    """
 
     def __init__(self, sync_word: np.ndarray, payload_bits: int = 256):
         """

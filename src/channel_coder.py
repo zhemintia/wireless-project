@@ -33,7 +33,6 @@ class ConvolutionalEncoder:
         self.generators = generators
         self.num_outputs = len(generators)
 
-        # 预计算每个可能状态 (0..2^(K-1)-1) 和每个输入比特 (0/1) 的输出
     def _conv_encode_bit(self, state: int, bit: int) -> tuple[np.ndarray, int]:
         """对单个比特编码。
 
@@ -118,6 +117,9 @@ class ViterbiDecoder:
 
     def _build_output_table(self) -> dict:
         """构建状态转移输出表。
+
+        ⚠ 与 ConvolutionalEncoder._conv_encode_bit 编码逻辑重复。
+        修改生成多项式时需同步更新两处。
 
         Returns:
             字典 {(state, bit): (output_bits, next_state)}。
