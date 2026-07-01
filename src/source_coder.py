@@ -4,6 +4,7 @@
 """
 
 import numpy as np
+import warnings
 from pathlib import Path
 
 
@@ -53,9 +54,11 @@ def bits_to_text(bits: np.ndarray, metadata: dict, output_path: str) -> str:
     # 丢弃不足一个字节的尾部比特（通常由噪声导致译码输出长度不匹配）
     byte_aligned_bits = num_bits - (num_bits % 8)
     if byte_aligned_bits < num_bits:
-        import warnings
-        warnings.warn(f"Dropping {num_bits - byte_aligned_bits} trailing bits "
-                      f"(not byte-aligned). Possible transmission error.")
+        warnings.warn(
+            f"Dropping {num_bits - byte_aligned_bits} trailing bits "
+            f"(not byte-aligned). Check for pipeline alignment issues "
+            f"or transmission errors."
+        )
         bits = bits[:byte_aligned_bits]
 
     if len(bits) == 0:

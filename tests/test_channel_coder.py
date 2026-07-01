@@ -109,21 +109,40 @@ class TestViterbiDecoder:
         assert np.array_equal(decoded, random_bits)
 
     def test_single_bit_error_correction(self, random_bits):
-        """测试单比特错误可被纠正（信道编码的纠错能力）。"""
+        """测试多位置单比特错误均可被纠正。（K=7 自由距离=10 ≥ 2*1+1）"""
         from src.channel_coder import ConvolutionalEncoder, ViterbiDecoder
         encoder = ConvolutionalEncoder(constraint_length=7)
         decoder = ViterbiDecoder(constraint_length=7,
                                   generators=(0o171, 0o133))
 
         coded = encoder.encode(random_bits)
-        # 翻转一个比特
-        coded_with_error = coded.copy()
-        coded_with_error[10] ^= 1
+        # 测试多个随机位置的单比特翻转
+        rng = np.random.RandomState(99)
+        test_positions = rng.choice(len(coded), size=10, replace=False)
+        for pos in test_positions:
+            coded_with_error = coded.copy()
+            coded_with_error[pos] ^= 1
+            decoded = decoder.decode_hard(coded_with_error)
+            errors = np.sum(decoded != random_bits)
+            assert errors == 0, f"Single-bit flip at pos {pos} should be correctable, got {errors} errors"
 
-        decoded = decoder.decode_hard(coded_with_error)
-        # 单比特错误应能被纠正（K=7 卷积码自由距离=10，可纠正少量错误）
-        errors = np.sum(decoded != random_bits)
-        assert errors == 0, f"Single-bit flip should be correctable, got {errors} errors"
+    def test_decode_llr_with_qpsk_soft(self, random_bits):
+        """测试 decode_llr + qpsk_demodulate_soft 集成路径无误码。"""
+        from src.channel_coder import ConvolutionalEncoder, ViterbiDecoder
+        from src.qpsk import qpsk_modulate, qpsk_demodulate_soft
+
+        encoder = ConvolutionalEncoder(constraint_length=7)
+        decoder = ViterbiDecoder(constraint_length=7,
+                                  generators=(0o171, 0o133))
+
+        # 编码 → QPSK 调制 → 软解调 → LLR 译码
+        coded = encoder.encode(random_bits)
+        symbols = qpsk_modulate(coded)
+        # 无噪声：用极小的 noise_var 产生接近理想的 LLR
+        llr = qpsk_demodulate_soft(symbols, noise_var=0.001)
+        decoded = decoder.decode_llr(llr)
+        assert np.array_equal(decoded, random_bits), \
+            "LLR decode path should recover bits perfectly without noise"
 
     def test_decode_empty(self):
         """测试空输入译码。"""

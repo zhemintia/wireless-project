@@ -148,8 +148,11 @@ class ViterbiDecoder:
         if len(coded_bits) == 0:
             return np.array([], dtype=np.uint8)
 
-        assert len(coded_bits) % self.num_outputs == 0, \
-            f"coded_bits length ({len(coded_bits)}) not multiple of {self.num_outputs}"
+        if len(coded_bits) % self.num_outputs != 0:
+            raise ValueError(
+                f"coded_bits length ({len(coded_bits)}) "
+                f"not a multiple of num_outputs ({self.num_outputs})"
+            )
         num_branches = len(coded_bits) // self.num_outputs
 
         # 路径度量: (num_branches + 1, num_states), 初始化为无穷大
@@ -208,8 +211,11 @@ class ViterbiDecoder:
         if len(soft_bits) == 0:
             return np.array([], dtype=np.uint8)
 
-        assert len(soft_bits) % self.num_outputs == 0, \
-            f"soft_bits length ({len(soft_bits)}) not multiple of {self.num_outputs}"
+        if len(soft_bits) % self.num_outputs != 0:
+            raise ValueError(
+                f"soft_bits length ({len(soft_bits)}) "
+                f"not a multiple of num_outputs ({self.num_outputs})"
+            )
         num_branches = len(soft_bits) // self.num_outputs
 
         path_metric = np.full((num_branches + 1, self._num_states), np.inf)
@@ -240,6 +246,72 @@ class ViterbiDecoder:
 
         decoded = np.zeros(info_length, dtype=np.uint8)
         # 从最小度量终态回溯（零尾终止时理论上应为状态 0，但有噪声时取 ML 估计）
+        best_state = int(np.argmin(path_metric[-1]))
+
+        for t in range(num_branches - 1, -1, -1):
+            prev_state = survivor_prev[t, best_state]
+            bit = (best_state >> (self.constraint_length - 2)) & 1
+            if t < info_length:
+                decoded[t] = bit
+            best_state = prev_state
+            if prev_state < 0:
+                break
+
+        return decoded
+
+    def decode_llr(self, llr_values: np.ndarray) -> np.ndarray:
+        """LLR 输入 Viterbi 译码（相关度量 / ML 度量）。
+
+        直接接受 qpsk_demodulate_soft() 输出的对数似然比 (LLR)。
+        分支度量: -sum(LLR[i] * (1 - 2*expected[i])) 是 AWGN 下的 ML 度量。
+
+        Args:
+            llr_values: LLR 序列 (float64 ndarray), 长度 = num_branches * 2。
+
+        Returns:
+            译码后的信息比特序列 (uint8 ndarray)。
+        """
+        if len(llr_values) == 0:
+            return np.array([], dtype=np.uint8)
+
+        if len(llr_values) % self.num_outputs != 0:
+            raise ValueError(
+                f"llr_values length ({len(llr_values)}) "
+                f"not a multiple of num_outputs ({self.num_outputs})"
+            )
+        num_branches = len(llr_values) // self.num_outputs
+
+        path_metric = np.full((num_branches + 1, self._num_states), np.inf)
+        path_metric[0, 0] = 0.0
+
+        survivor_prev = np.full((num_branches, self._num_states), -1, dtype=np.int32)
+
+        for t in range(num_branches):
+            llr_branch = llr_values[t * self.num_outputs:
+                                    (t + 1) * self.num_outputs]
+
+            for state in range(self._num_states):
+                if np.isinf(path_metric[t, state]):
+                    continue
+
+                for bit in (0, 1):
+                    expected, next_state = self._output_table[(state, bit)]
+                    # 相关度量: minimize -sum(LLR[i] * (1 - 2*expected[i]))
+                    correlation = np.sum(
+                        llr_branch * (1.0 - 2.0 * expected.astype(np.float64))
+                    )
+                    branch_metric = -correlation
+                    new_metric = path_metric[t, state] + branch_metric
+
+                    if new_metric < path_metric[t + 1, next_state]:
+                        path_metric[t + 1, next_state] = new_metric
+                        survivor_prev[t, next_state] = state
+
+        info_length = num_branches - self._tail_bits
+        if info_length <= 0:
+            return np.array([], dtype=np.uint8)
+
+        decoded = np.zeros(info_length, dtype=np.uint8)
         best_state = int(np.argmin(path_metric[-1]))
 
         for t in range(num_branches - 1, -1, -1):

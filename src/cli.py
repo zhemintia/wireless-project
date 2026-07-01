@@ -103,13 +103,17 @@ def main(argv=None):
     if args.verbose:
         print("正在运行仿真...")
 
-    metrics = pipeline.run(
-        input_path=input_path,
-        output_dir=output_dir,
-        snr_db=args.snr,
-        seed=args.seed,
-        sync_offset=args.sync_offset,
-    )
+    try:
+        metrics = pipeline.run(
+            input_path=input_path,
+            output_dir=output_dir,
+            snr_db=args.snr,
+            seed=args.seed,
+            sync_offset=args.sync_offset,
+        )
+    except ValueError as e:
+        print(f"错误: {e}")
+        sys.exit(1)
 
     # 输出结果
     print()

@@ -117,9 +117,11 @@ class FrameSynchronizer:
 
         # 检测阈值
         max_corr = np.max(correlation)
-        if max_corr < 0.1:
+        # 绝对阈值保底（~0.2 相当于随机匹配的预期相关值，低于此值说明无有效信号）
+        if max_corr < 0.15:
             return []
-        threshold = max_corr * self.threshold_factor
+        # 相对阈值 + 绝对阈值保底（防止高 SNR 帧的强相关淹没低 SNR 帧的弱相关）
+        threshold = max(max_corr * self.threshold_factor, 0.2)
 
         # 找到所有超过阈值的局部最大值，记录 (位置, 相关值)
         peaks = []
