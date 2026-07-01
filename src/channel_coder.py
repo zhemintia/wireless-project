@@ -34,8 +34,6 @@ class ConvolutionalEncoder:
         self.num_outputs = len(generators)
 
         # 预计算每个可能状态 (0..2^(K-1)-1) 和每个输入比特 (0/1) 的输出
-        self._num_states = 1 << (constraint_length - 1)
-
     def _conv_encode_bit(self, state: int, bit: int) -> tuple[np.ndarray, int]:
         """对单个比特编码。
 

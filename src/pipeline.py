@@ -128,9 +128,9 @@ class WirelessPipeline:
 
         # 7. 添加同步偏移
         if sync_offset > 0:
+            rng = np.random.RandomState(seed + 1)
             offset_noise = (
-                np.random.RandomState(seed + 1).randn(sync_offset) +
-                1j * np.random.RandomState(seed + 1).randn(sync_offset)
+                rng.randn(sync_offset) + 1j * rng.randn(sync_offset)
             ) * 0.01
             rx_symbols = np.concatenate([offset_noise, rx_symbols])
 
@@ -183,11 +183,7 @@ class WirelessPipeline:
         # ==================== 指标计算 ====================
 
         # BER
-        ber = compute_ber(tx_scrambled, rx_decoded)
-        bit_errors = int(np.sum(
-            tx_scrambled[:min(len(tx_scrambled), len(rx_decoded))] !=
-            rx_decoded[:min(len(tx_scrambled), len(rx_decoded))]
-        ))
+        ber, bit_errors = compute_ber(tx_scrambled, rx_decoded)
 
         # FER
         num_tx_frames = len(frames)

@@ -12,7 +12,7 @@
 """
 
 import numpy as np
-from typing import List
+from typing import List, Union
 
 
 class FramePacker:
@@ -95,14 +95,17 @@ class FrameUnpacker:
         self._header_bits = self._sw_len + self._len_field_bits
         self._frame_bits = self._header_bits + payload_bits
 
-    def unpack(self, frames) -> np.ndarray:
+    def unpack(self, frames: Union[List[np.ndarray], np.ndarray]) -> np.ndarray:
         """从帧列表中提取数据比特。
 
         Args:
-            frames: 帧列表（2D array 或 list of 1D arrays）。
+            frames: 帧列表（list of 1D arrays 或 2D ndarray）。
 
         Returns:
             提取的比特序列 (uint8 ndarray)。
+
+        Raises:
+            TypeError: 如果 frames 不是 list 或 ndarray。
         """
         if isinstance(frames, np.ndarray) and frames.ndim == 1 and len(frames) == 0:
             return np.array([], dtype=np.uint8)

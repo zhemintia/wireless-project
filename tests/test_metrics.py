@@ -10,36 +10,40 @@ class TestComputeBER:
     def test_no_errors(self):
         from src.metrics import compute_ber
         tx = np.array([0, 1, 0, 1, 1, 0, 1, 1], dtype=np.uint8)
-        ber = compute_ber(tx, tx)
+        ber, errors = compute_ber(tx, tx)
         assert ber == 0.0
+        assert errors == 0
 
     def test_all_errors(self):
         from src.metrics import compute_ber
         tx = np.array([0, 0, 0, 0], dtype=np.uint8)
         rx = np.array([1, 1, 1, 1], dtype=np.uint8)
-        ber = compute_ber(tx, rx)
+        ber, errors = compute_ber(tx, rx)
         assert ber == 1.0
+        assert errors == 4
 
     def test_half_errors(self):
         from src.metrics import compute_ber
         tx = np.array([0, 0, 1, 1], dtype=np.uint8)
         rx = np.array([1, 1, 1, 1], dtype=np.uint8)
-        ber = compute_ber(tx, rx)
+        ber, errors = compute_ber(tx, rx)
         assert ber == 0.5
+        assert errors == 2
 
     def test_different_lengths(self):
         from src.metrics import compute_ber
         tx = np.array([0, 1, 0, 1, 0, 1], dtype=np.uint8)
         rx = np.array([1, 1, 0, 1], dtype=np.uint8)
-        ber = compute_ber(tx, rx)
+        ber, errors = compute_ber(tx, rx)
         assert 0 <= ber <= 1.0
 
     def test_empty(self):
         from src.metrics import compute_ber
         tx = np.array([], dtype=np.uint8)
         rx = np.array([], dtype=np.uint8)
-        ber = compute_ber(tx, rx)
+        ber, errors = compute_ber(tx, rx)
         assert ber == 0.0
+        assert errors == 0
 
 
 class TestComputeFER:

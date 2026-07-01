@@ -57,7 +57,9 @@ class FrameSynchronizer:
         return qpsk_modulate(bits)
 
     def compute_correlation(self, symbols: np.ndarray) -> np.ndarray:
-        """计算接收符号与同步字参考的滑动互相关。
+        """计算接收符号与同步字参考的滑动归一化互相关。
+
+        ⚠ 当前为 Python 循环实现，长信号可使用 scipy.signal.correlate 加速。
 
         Args:
             symbols: 接收复符号序列。

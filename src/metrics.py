@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional, List
 
 
-def compute_ber(tx_bits: np.ndarray, rx_bits: np.ndarray) -> float:
+def compute_ber(tx_bits: np.ndarray, rx_bits: np.ndarray) -> tuple[float, int]:
     """计算误比特率 (Bit Error Rate)。
 
     Args:
@@ -17,13 +17,13 @@ def compute_ber(tx_bits: np.ndarray, rx_bits: np.ndarray) -> float:
         rx_bits: 接收比特序列。
 
     Returns:
-        BER = 错误比特数 / 总比特数。
+        (BER, bit_errors): BER = 错误比特数 / 总比特数, bit_errors = 错误比特数。
     """
     if len(tx_bits) == 0:
-        return 0.0
+        return 0.0, 0
     min_len = min(len(tx_bits), len(rx_bits))
-    errors = np.sum(tx_bits[:min_len] != rx_bits[:min_len])
-    return float(errors / min_len)
+    errors = int(np.sum(tx_bits[:min_len] != rx_bits[:min_len]))
+    return float(errors / min_len), errors
 
 
 def compute_fer(
@@ -76,9 +76,17 @@ def compute_text_recovery_rate(original_path: str, received_path: str) -> float:
     """
     try:
         original = Path(original_path).read_text(encoding='utf-8')
+    except FileNotFoundError:
+        return 0.0  # 文件不存在：Pipeline 配置错误
+    except UnicodeDecodeError:
+        return 0.0  # 源文件编码损坏
+
+    try:
         received = Path(received_path).read_text(encoding='utf-8')
-    except (FileNotFoundError, UnicodeDecodeError):
-        return 0.0
+    except FileNotFoundError:
+        return 0.0  # 输出文件未生成：传输完全失败
+    except UnicodeDecodeError:
+        return 0.0  # 接收比特损坏导致无效 UTF-8
 
     if not original:
         return 1.0 if not received else 0.0
@@ -163,14 +171,20 @@ def plot_ber_curve(
         return
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.semilogy(snr_values, ber_values, 'o-', color='steelblue',
+    # semilogy 不支持 0 值，替换为一个极小的正值
+    ber_plot = np.array(ber_values, dtype=np.float64)
+    ber_plot[ber_plot == 0] = 1e-6
+    ax.semilogy(snr_values, ber_plot, 'o-', color='steelblue',
                 linewidth=1.5, markersize=5, label='Simulated BER')
 
-    # 理论 QPSK BER (无编码): 0.5 * erfc(sqrt(Eb/N0))
+    # 理论 QPSK BER (无编码, Gray 映射):
+    #   BER_QPSK = 0.5 * erfc(sqrt(Eb/N0))
+    #   Eb/N0 = Es/N0 / 2 (QPSK 每符号 2 比特)
     try:
         from scipy.special import erfc
         snr_linear = 10 ** (np.array(snr_values) / 10.0)
-        theoretical_ber = 0.5 * erfc(np.sqrt(snr_linear))
+        eb_n0_linear = snr_linear / 2.0  # Es/N0 → Eb/N0
+        theoretical_ber = 0.5 * erfc(np.sqrt(eb_n0_linear))
         ax.semilogy(snr_values, theoretical_ber, '--', color='red',
                     linewidth=1.5, label='Uncoded QPSK (theory)')
     except ImportError:

@@ -18,16 +18,6 @@ Gray 映射星座:
 import numpy as np
 
 
-# Gray 映射表: (bit0, bit1) → 复符号
-# bit0 控制 I 路, bit1 控制 Q 路: 0→+1, 1→-1
-_GRAY_MAP = {
-    (0, 0): (1 + 1j),   # Q1
-    (1, 0): (-1 + 1j),  # Q2 — 1 bit diff from (0,0)
-    (1, 1): (-1 - 1j),  # Q3 — 1 bit diff from (1,0)
-    (0, 1): (1 - 1j),   # Q4 — 1 bit diff from (1,1) and (0,0)
-}
-
-
 def qpsk_modulate(bits: np.ndarray) -> np.ndarray:
     """QPSK 调制（Gray 映射）。
 
@@ -43,13 +33,14 @@ def qpsk_modulate(bits: np.ndarray) -> np.ndarray:
     if num_symbols == 0:
         return np.array([], dtype=np.complex128)
 
-    symbols = np.zeros(num_symbols, dtype=np.complex128)
-    scale = 1.0 / np.sqrt(2)  # 归一化因子
+    # 截断为偶数长度（丢弃最后一个奇数比特）
+    even_bits = bits[:num_symbols * 2]
 
-    for i in range(num_symbols):
-        b0 = int(bits[2 * i])
-        b1 = int(bits[2 * i + 1])
-        symbols[i] = _GRAY_MAP[(b0, b1)] * scale
+    # 向量化实现: b0→I路, b1→Q路, 0→+1, 1→-1
+    b0 = even_bits[0::2].astype(np.float64)
+    b1 = even_bits[1::2].astype(np.float64)
+    scale = 1.0 / np.sqrt(2)
+    symbols = ((1.0 - 2.0 * b0) + 1j * (1.0 - 2.0 * b1)) * scale
 
     return symbols
 
@@ -91,12 +82,16 @@ def qpsk_demodulate_soft(
     LLR(b) = log(P(b=0|r) / P(b=1|r))
 
     对于 AWGN 信道和 Gray QPSK:
-    LLR(b0) ≈ (sqrt(2) / σ²) * Re(r)
-    LLR(b1) ≈ (sqrt(2) / σ²) * Im(r)
+    LLR(b0) ≈ (sqrt(2) / σ²_real) * Re(r)
+    LLR(b1) ≈ (sqrt(2) / σ²_real) * Im(r)
+
+    ⚠ noise_var 是**每实维**噪声方差 σ²_real = N0/2（非复维方差 N0）。
+    如果从 snr_db_to_noise_var(snr_db) 获得复方差 N0，需除以 2：
+        noise_var_real = snr_db_to_noise_var(snr_db) / 2.0
 
     Args:
         symbols: 接收复符号序列 (complex ndarray)。
-        noise_var: 噪声方差 σ²（每实维）。
+        noise_var: 噪声方差 σ²_real（每实维 = N0/2）。
 
     Returns:
         LLR 序列 (float64 ndarray)，长度 = 2 * len(symbols)。

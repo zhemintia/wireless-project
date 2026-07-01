@@ -66,8 +66,8 @@ class TestFrameSynchronizer:
 
         # 前缀填充 + 完整帧（含长度字段）
         prefix_symbols_count = 50
-        prefix = np.random.RandomState(1).randn(prefix_symbols_count) + \
-            1j * np.random.RandomState(1).randn(prefix_symbols_count)
+        rng = np.random.RandomState(1)
+        prefix = rng.randn(prefix_symbols_count) + 1j * rng.randn(prefix_symbols_count)
         prefix = prefix * 0.1  # 低幅度噪声
 
         length_bits = np.zeros(16, dtype=np.uint8)
@@ -168,8 +168,8 @@ class TestFrameSynchronizer:
         )
 
         # 构造信号: 噪声前导 + 完整帧（含长度字段）
-        prefix = np.random.RandomState(5).randn(30) * 0.1 + \
-            1j * np.random.RandomState(5).randn(30) * 0.1
+        rng = np.random.RandomState(5)
+        prefix = (rng.randn(30) + 1j * rng.randn(30)) * 0.1
 
         # 构造含长度字段的完整帧
         length_bits = np.zeros(16, dtype=np.uint8)
@@ -211,8 +211,8 @@ class TestFrameSynchronizer:
 
         # 添加偏移
         offset = 20
-        noisy_prefix = np.random.RandomState(8).randn(offset) * 0.05 + \
-            1j * np.random.RandomState(8).randn(offset) * 0.05
+        rng = np.random.RandomState(8)
+        noisy_prefix = (rng.randn(offset) + 1j * rng.randn(offset)) * 0.05
         all_sym = np.concatenate([noisy_prefix, symbols])
 
         # 同步
