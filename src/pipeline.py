@@ -210,12 +210,18 @@ class WirelessPipeline:
             'snr_db': float(snr_db),
             'seed': int(seed),
             'sync_offset': int(sync_offset),
+            # 实际仿真数据（供 CLI 绘图使用）
+            # 内部数据（供 CLI 绘图，不写入 JSON）
+            '_rx_symbols': rx_symbols,
+            '_frame_starts': frame_starts,
+            '_synchronizer': self.synchronizer,
         }
 
-        # 保存 metrics.json
+        # 保存 metrics.json（仅公共字段）
+        json_metrics = {k: v for k, v in metrics.items() if not k.startswith('_')}
         metrics_path = out_path / 'metrics.json'
         with open(metrics_path, 'w', encoding='utf-8') as f:
-            json.dump(metrics, f, indent=2, ensure_ascii=False)
+            json.dump(json_metrics, f, indent=2, ensure_ascii=False)
 
         return metrics
 

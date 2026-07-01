@@ -11,7 +11,7 @@
 """
 
 import numpy as np
-from typing import List, Optional
+from typing import List
 
 
 class FrameSynchronizer:
@@ -127,7 +127,7 @@ class FrameSynchronizer:
                 local_max_idx = i
                 while i < len(correlation) - 1 and correlation[i + 1] >= correlation[i]:
                     i += 1
-                    if correlation[i] > local_max:
+                    if correlation[i] >= local_max:  # >= 处理平顶：取最后位置
                         local_max = correlation[i]
                         local_max_idx = i
                 while i < len(correlation) - 1 and correlation[i + 1] <= correlation[i]:

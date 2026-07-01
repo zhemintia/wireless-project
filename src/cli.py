@@ -137,51 +137,41 @@ def main(argv=None):
         figs_dir = Path(output_dir) / 'figures'
         figs_dir.mkdir(parents=True, exist_ok=True)
 
-        # 星座图（使用接收符号）
-        try:
-            from src.qpsk import qpsk_modulate
-            from src.awgn import awgn_channel
-            # 生成测试用的星座图
-            test_bits = np.random.RandomState(args.seed).randint(
-                0, 2, size=2000, dtype=np.uint8
-            )
-            test_sym = qpsk_modulate(test_bits)
-            rx_sym = awgn_channel(test_sym, snr_db=args.snr, seed=args.seed)
-            plot_constellation(
-                rx_sym,
-                output_path=str(figs_dir / 'constellation_rx.png'),
-                title=f'Received Constellation (SNR = {args.snr} dB)',
-            )
-            if args.verbose:
-                print(f"  星座图: {figs_dir / 'constellation_rx.png'}")
-        except Exception as e:
-            if args.verbose:
-                print(f"  星座图生成失败: {e}")
+        rx_symbols = metrics.get('_rx_symbols')
+        frame_starts = metrics.get('_frame_starts')
+        syncer = metrics.get('_synchronizer')
 
-        # 同步相关图
-        try:
-            sync_symbols = pipeline.synchronizer.sync_symbols
-            # 重新生成含同步字的符号用于绘制相关图
-            from src.qpsk import qpsk_modulate
-            from src.awgn import awgn_channel
-            test_payload = np.random.RandomState(args.seed).randint(
-                0, 2, size=args.frame_length, dtype=np.uint8
-            )
-            test_frame = np.concatenate([config.sync_word, np.zeros(16, dtype=np.uint8), test_payload])
-            test_sym2 = qpsk_modulate(test_frame)
-            rx_sym2 = awgn_channel(test_sym2, snr_db=args.snr, seed=args.seed + 1)
-            corr = pipeline.synchronizer.compute_correlation(rx_sym2)
-            peaks = pipeline.synchronizer.find_frame_starts(rx_sym2)
-            if len(corr) > 0:
-                plot_sync_correlation(
-                    corr, peaks,
-                    output_path=str(figs_dir / 'sync_correlation.png'),
+        if rx_symbols is not None and len(rx_symbols) > 0:
+            # 星座图（使用实际接收符号）
+            try:
+                plot_constellation(
+                    rx_symbols,
+                    output_path=str(figs_dir / 'constellation_rx.png'),
+                    title=f'Received Constellation (SNR = {args.snr} dB)',
                 )
                 if args.verbose:
-                    print(f"  同步相关图: {figs_dir / 'sync_correlation.png'}")
-        except Exception as e:
-            if args.verbose:
-                print(f"  同步相关图生成失败: {e}")
+                    print(f"  星座图: {figs_dir / 'constellation_rx.png'}")
+            except Exception as e:
+                if args.verbose:
+                    print(f"  星座图生成失败: {e}")
+
+            # 同步相关图（使用实际同步器输出）
+            if syncer is not None:
+                try:
+                    corr = syncer.compute_correlation(rx_symbols)
+                    peaks = syncer.find_frame_starts(rx_symbols)
+                    if len(corr) > 0:
+                        plot_sync_correlation(
+                            corr, peaks,
+                            output_path=str(figs_dir / 'sync_correlation.png'),
+                        )
+                        if args.verbose:
+                            print(f"  同步相关图: {figs_dir / 'sync_correlation.png'}")
+                except Exception as e:
+                    if args.verbose:
+                        print(f"  同步相关图生成失败: {e}")
+        elif args.verbose:
+            print("  警告: 无接收符号数据，跳过图表生成")
 
     return 0
 

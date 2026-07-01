@@ -44,15 +44,22 @@ def compute_fer(
     if len(tx_frames) == 0:
         return 0.0
 
-    frame_errors = abs(len(tx_frames) - len(rx_frames))
-    for i in range(min(len(tx_frames), len(rx_frames))):
+    n_tx = len(tx_frames)
+    n_rx = len(rx_frames)
+
+    # 帧数不匹配：丢失/多出的帧各计为 1 个错误
+    frame_errors = abs(n_tx - n_rx)
+
+    # 假设帧按发送顺序一一对应（同步器按位置升序返回帧起始位置，
+    # 因此如果帧被跳过，对齐可能偏移，但无帧序号无法检测）
+    for i in range(min(n_tx, n_rx)):
         tx = tx_frames[i]
         rx = rx_frames[i]
         min_len = min(len(tx), len(rx))
         if not np.array_equal(tx[:min_len], rx[:min_len]):
             frame_errors += 1
 
-    return float(frame_errors / len(tx_frames))
+    return float(frame_errors / n_tx)
 
 
 def compute_text_recovery_rate(original_path: str, received_path: str) -> float:

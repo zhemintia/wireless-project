@@ -58,8 +58,13 @@ def scramble(bits: np.ndarray, seed: int = 0x7F, poly: int = 0x91) -> np.ndarray
 def descramble(bits: np.ndarray, seed: int = 0x7F, poly: int = 0x91) -> np.ndarray:
     """解扰器：对比特序列进行解扰。
 
-    自同步解扰：使用与加扰器完全相同的 LFSR 结构。
-    由于自同步特性，即使初始状态不同，经过 7 个比特后也能自动同步。
+    自同步解扰：使用与加扰器完全相同的 LFSR 结构，但状态更新使用**接收比特**
+    而非输出比特。这是自同步的关键 —— 即使初始状态错误，经过最多 K=7 个
+    比特后解扰器自动收敛到正确状态。
+
+    ⚠ 与 scramble() 的区别：
+       scramble:   new_state = ((state << 1) | output) & 0x7F
+       descramble: new_state = ((state << 1) | bit) & 0x7F   ← 用接收比特！
 
     Args:
         bits: 加扰后的比特序列 (uint8 ndarray)。
@@ -77,11 +82,11 @@ def descramble(bits: np.ndarray, seed: int = 0x7F, poly: int = 0x91) -> np.ndarr
 
     for i in range(len(bits)):
         bit = int(bits[i])
-        # 解扰器与加扰器结构相同
-        # 反馈从接收比特计算（自同步特性）
+        # 反馈从接收比特计算（自同步：不依赖输出比特即可收敛）
         feedback = bin(((state << 1) & poly)).count('1') % 2
         output = bit ^ feedback
-        new_state = ((state << 1) | bit) & 0x7F  # 使用接收比特更新状态
+        # 关键：状态更新用接收比特（非 output），实现自同步
+        new_state = ((state << 1) | bit) & 0x7F
         result[i] = output
         state = new_state
 

@@ -30,10 +30,10 @@
 
 ### 1.3 GitHub 提交信息
 
-- **学生 Fork 仓库地址**：[待填写]
-- **PR 编号**：[待填写]
+- **学生 Fork 仓库地址**：https://github.com/zhemintia/wireless-project
+- **PR 编号**：[如有课程仓库 PR 请填写]
 - **提交分支**：main
-- **最终 commit**：[待填写]
+- **最终 commit**：`b25a383`
 
 ---
 

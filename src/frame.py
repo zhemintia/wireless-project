@@ -130,7 +130,13 @@ class FrameUnpacker:
             length_val = 0
             for b in length_bits:
                 length_val = (length_val << 1) | int(b)
-            length_val = min(length_val, self.payload_bits)
+            if length_val > self.payload_bits:
+                import warnings
+                warnings.warn(
+                    f"Frame length field corrupted: {length_val} > {self.payload_bits}. "
+                    f"Clipping to max payload. Data may be unrecoverable."
+                )
+                length_val = self.payload_bits
             # 读取载荷
             payload = frame[self._header_bits:self._header_bits + length_val]
             all_bits.append(payload)
