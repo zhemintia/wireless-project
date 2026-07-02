@@ -141,8 +141,22 @@ class TestWirelessPipeline:
         assert 'ber' in metrics
         assert metrics['snr_db'] == 100.0
 
+    def test_soft_decision_path(self, test_text_file, tmp_output_dir):
+        """测试 soft_decision=True 路径正常完成。"""
+        from src.pipeline import WirelessPipeline
+        pipeline = WirelessPipeline()
+        metrics = pipeline.run(
+            input_path=test_text_file,
+            output_dir=tmp_output_dir,
+            snr_db=100.0,
+            seed=42,
+            soft_decision=True,
+        )
+        assert metrics['ber'] == 0.0
+        assert metrics['text_recovery_rate'] == 1.0
+
     def test_sync_failed_low_snr(self, test_text_file, tmp_output_dir):
-        """测试极低 SNR 下同步失败被正确报告。"""
+        """测试极低 SNR 下系统不崩溃且有合理输出。"""
         from src.pipeline import WirelessPipeline
         pipeline = WirelessPipeline()
         metrics = pipeline.run(
@@ -151,7 +165,11 @@ class TestWirelessPipeline:
             snr_db=-20.0,  # 极低 SNR
             seed=42,
         )
-        # 可能同步失败或 BER 很高
+        # 极低 SNR：同步失败或 BER 极高
+        assert 'snr_db' in metrics
         if metrics.get('sync_failed'):
             assert metrics['fer'] == 1.0
-        assert 'snr_db' in metrics
+        else:
+            # 即使同步"成功"（噪声误触发），BER 也应接近 0.5
+            assert metrics['ber'] >= 0.3, \
+                f"At SNR=-20dB, BER should be high, got {metrics['ber']}"

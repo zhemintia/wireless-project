@@ -29,18 +29,18 @@ class TestAWGNChannel:
         from src.awgn import awgn_channel
         symbols = np.ones(1000, dtype=np.complex128) * (1 + 1j) / np.sqrt(2)
         noisy = awgn_channel(symbols, snr_db=100.0)
-        # 极高 SNR 时应非常接近原信号
+        # SNR=100dB: noise_var = 10^(-10), MSE ≈ 1e-10
         mse = np.mean(np.abs(noisy - symbols) ** 2)
-        assert mse < 0.01
+        assert mse < 1e-8  # 允许统计波动
 
     def test_low_snr_adds_noise(self):
         """测试低 SNR 时信号明显变化。"""
         from src.awgn import awgn_channel
         symbols = np.ones(1000, dtype=np.complex128) * (1 + 1j) / np.sqrt(2)
         noisy = awgn_channel(symbols, snr_db=-10.0)
-        # 噪声功率应显著
+        # SNR=-10dB: noise_var = 10^(10/10) = 10, MSE ≈ 10
         mse = np.mean(np.abs(noisy - symbols) ** 2)
-        assert mse > 0.1
+        assert mse > 5.0  # 预期 ~10，保留裕度
 
     def test_seed_reproducibility(self):
         """测试相同 seed 产生相同噪声。"""

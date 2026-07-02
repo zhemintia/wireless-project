@@ -100,6 +100,21 @@ class FrameUnpacker:
         self._header_bits = self._sw_len + self._len_field_bits
         self._frame_bits = self._header_bits + payload_bits
 
+    @property
+    def header_bits(self) -> int:
+        """帧头比特数（sync_word + length_field）。"""
+        return self._header_bits
+
+    @property
+    def sw_len(self) -> int:
+        """同步字比特数。"""
+        return self._sw_len
+
+    @property
+    def len_field_bits(self) -> int:
+        """长度字段比特数。"""
+        return self._len_field_bits
+
     def unpack(self, frames: Union[List[np.ndarray], np.ndarray]) -> np.ndarray:
         """从帧列表中提取数据比特。
 
@@ -124,8 +139,7 @@ class FrameUnpacker:
 
         all_bits = []
 
-        # 从最后一帧获取总比特数（第一帧可能不包含总数信息）
-        # 累积所有数据，最后截断到正确长度
+        # 逐帧提取载荷：每帧的长度由帧头中的 16-bit 长度字段指定
         for frame in frames:
             frame = np.atleast_1d(frame)
             if len(frame) == 0:

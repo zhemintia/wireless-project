@@ -188,3 +188,41 @@ class TestFrameUnpacker:
         assert len(frames) >= 3
         recovered = unpacker.unpack(frames)
         assert np.array_equal(recovered, bits)
+
+    def test_unpack_with_sync_check_valid(self, default_config):
+        """测试 unpack_with_sync_check：有效帧无同步错误。"""
+        from src.frame import FramePacker, FrameUnpacker
+        packer = FramePacker(
+            sync_word=default_config.sync_word,
+            payload_bits=default_config.frame_payload_bits,
+        )
+        unpacker = FrameUnpacker(
+            sync_word=default_config.sync_word,
+            payload_bits=default_config.frame_payload_bits,
+        )
+        bits = np.ones(default_config.frame_payload_bits, dtype=np.uint8)
+        frames = packer.pack(bits)
+        recovered, sync_errs = unpacker.unpack_with_sync_check(frames)
+        assert len(sync_errs) == 0
+        assert np.array_equal(recovered, bits)
+
+    def test_unpack_with_sync_check_corrupted(self, default_config):
+        """测试 unpack_with_sync_check：损坏同步字的帧被正确检测。"""
+        from src.frame import FramePacker, FrameUnpacker
+        packer = FramePacker(
+            sync_word=default_config.sync_word,
+            payload_bits=default_config.frame_payload_bits,
+        )
+        unpacker = FrameUnpacker(
+            sync_word=default_config.sync_word,
+            payload_bits=default_config.frame_payload_bits,
+        )
+        bits = np.ones(default_config.frame_payload_bits * 2 + 50, dtype=np.uint8)
+        frames = packer.pack(bits)
+        # 损坏第二帧的同步字
+        frames[1][0] ^= 1
+        recovered, sync_errs = unpacker.unpack_with_sync_check(frames)
+        assert len(sync_errs) >= 1  # 第二帧同步字损坏
+        assert 1 in sync_errs
+        # 有效帧的载荷仍被提取
+        assert len(recovered) > 0

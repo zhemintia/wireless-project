@@ -55,6 +55,12 @@ def parse_args(argv=None):
         help='每帧载荷比特数 (默认: 256)',
     )
     parser.add_argument(
+        '--soft',
+        action='store_true',
+        default=False,
+        help='使用软判决 LLR 译码（约 2dB 增益）',
+    )
+    parser.add_argument(
         '--no-plot',
         action='store_false',
         dest='plot',
@@ -110,8 +116,9 @@ def main(argv=None):
             snr_db=args.snr,
             seed=args.seed,
             sync_offset=args.sync_offset,
+            soft_decision=args.soft,
         )
-    except ValueError as e:
+    except (ValueError, RuntimeError) as e:
         print(f"错误: {e}")
         sys.exit(1)
 

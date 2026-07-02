@@ -48,17 +48,17 @@ class TestConvolutionalEncoder:
         assert np.all(coded == 0)
 
     def test_known_sequence(self):
-        """测试已知序列的编码输出（回归验证）。"""
+        """测试已知序列的编码输出（黄金参考/回归验证）。"""
         from src.channel_coder import ConvolutionalEncoder
         encoder = ConvolutionalEncoder(constraint_length=3,
                                        generators=(0o5, 0o7))
         bits = np.array([1, 0, 1, 1], dtype=np.uint8)
         coded = encoder.encode(bits)
-        # 对于 K=3, G=(5,7): 输出应为特定序列
-        # 手动计算验证
         assert len(coded) == (4 + 2) * 2  # (input + K-1) * 2 = 12
-        # 序列至少不是全零
-        assert np.sum(coded) > 0
+        # K=3, G=(5=101, 7=111), input=[1,0,1,1] + tail=[0,0]
+        expected = np.array([1,1, 0,1, 0,0, 1,0, 1,0, 1,1], dtype=np.uint8)
+        assert np.array_equal(coded, expected), \
+            f"Golden reference mismatch: got {coded}"
 
     def test_empty_input(self):
         """测试空输入返回空数组。"""

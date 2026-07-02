@@ -2,11 +2,11 @@
 
 QPSK (Quadrature Phase Shift Keying) 将每 2 个比特映射为一个复基带符号。
 
-Gray 映射星座:
+Gray 映射星座 (bit0→I, bit1→Q, 0→+1, 1→-1):
     00 →  (1 + 1j) / sqrt(2)   (45°)
-    01 →  (-1 + 1j) / sqrt(2)  (135°)
-    11 →  (-1 - 1j) / sqrt(2)  (225°)
-    10 →  (1 - 1j) / sqrt(2)   (315°)
+    10 →  (-1 + 1j) / sqrt(2)  (135°) — 1 bit diff from 00
+    11 →  (-1 - 1j) / sqrt(2)  (225°) — 1 bit diff from 10
+    01 →  (1 - 1j) / sqrt(2)   (315°) — 1 bit diff from 11 and 00
 
 相邻星座点仅 1 bit 差异，最小化解调错误时的比特错误数。
 
@@ -80,7 +80,10 @@ def qpsk_demodulate_soft(
     symbols: np.ndarray,
     noise_var: float = 1.0
 ) -> np.ndarray:
-    """QPSK 软判决解调（LLR 计算）— 预留，当前 Pipeline 使用硬判决。
+    """QPSK 软判决解调（LLR 计算）。
+
+    可通过 Pipeline 的 soft_decision=True 参数启用，结合 decode_llr
+    获得约 2dB 的编码增益。
 
     计算每个比特的对数似然比 (LLR):
     LLR(b) = log(P(b=0|r) / P(b=1|r))

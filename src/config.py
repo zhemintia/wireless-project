@@ -40,7 +40,7 @@ class WirelessConfig:
 
     # --- 扰码器参数 ---
     scrambler_poly: int = 0x91  # x^7 + x^4 + 1 → 10010001
-    scrambler_init: int = 0x7F  # 全 1 初始状态
+    scrambler_init: int = 0x7F  # 全 1 初始状态（Pipeline 使用 default_seed 而非此字段）
 
     # --- 仿真参数 ---
     default_snr_db: float = 10.0

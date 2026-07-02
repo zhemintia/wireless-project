@@ -152,48 +152,72 @@ class WirelessPipeline:
                 'snr_db': snr_db, 'sync_failed': True,
             }
 
-        # 9. QPSK 解调 + 解帧 + 信道译码
+        # 9. QPSK 解调 → 硬比特（用于帧解封装 + FER 计算）
+        rx_bits_list = [qpsk_demodulate_hard(fsym) for fsym in rx_frames_sym]
+        if rx_bits_list:
+            all_rx_bits = np.concatenate(rx_bits_list)
+        else:
+            all_rx_bits = np.array([], dtype=np.uint8)
+
+        if len(all_rx_bits) < len(all_tx_bits):
+            all_rx_bits = np.pad(all_rx_bits,
+                                 (0, len(all_tx_bits) - len(all_rx_bits)))
+        elif len(all_rx_bits) > len(all_tx_bits):
+            all_rx_bits = all_rx_bits[:len(all_tx_bits)]
+
+        # 10. 解帧
+        rx_frames_bits = self._reshape_to_frames(all_rx_bits)
+        rx_encoded, sync_errs = self.unpacker.unpack_with_sync_check(
+            rx_frames_bits
+        )
+
+        # 11. 信道译码
         if soft_decision:
-            # 软判决路径：QPSK 软解调 (LLR) → Viterbi LLR 译码（~2dB 增益）
+            # 软判决路径：每帧提取载荷对应的 LLR → Viterbi LLR 译码（~2dB 增益）
             noise_var_real = snr_db_to_noise_var(snr_db) / 2.0
-            rx_bits_list = [
-                qpsk_demodulate_soft(fsym, noise_var=noise_var_real)
-                for fsym in rx_frames_sym
-            ]
-            if rx_bits_list:
-                all_rx_llr = np.concatenate(rx_bits_list)
+            header_bits_per_frame = self.unpacker.header_bits  # sync + length
+            payload_llr_list = []
+
+            for fi, fsym in enumerate(rx_frames_sym):
+                # 软解调该帧所有符号 → LLR（长度 = frame_total_bits）
+                frame_llr = qpsk_demodulate_soft(fsym, noise_var=noise_var_real)
+
+                # 从对应硬判决帧中读取长度字段以确定有效载荷比特数
+                if fi < len(rx_frames_bits):
+                    frame_bits = rx_frames_bits[fi]
+                    len_start = self.unpacker.sw_len
+                    len_end = len_start + self.unpacker.len_field_bits
+                    length_bits = frame_bits[len_start:len_end]
+                    if len(length_bits) >= self.unpacker._len_field_bits:
+                        length_val = 0
+                        for b in length_bits:
+                            length_val = (length_val << 1) | int(b)
+                        length_val = min(length_val, self.unpacker.payload_bits)
+                    else:
+                        length_val = 0
+                    # 提取该帧载荷对应的 LLR
+                    payload_start = header_bits_per_frame
+                    payload_end = payload_start + length_val
+                    if payload_end <= len(frame_llr):
+                        payload_llr_list.append(frame_llr[payload_start:payload_end])
+                    elif payload_start < len(frame_llr):
+                        payload_llr_list.append(frame_llr[payload_start:])
+
+            if payload_llr_list:
+                all_rx_llr = np.concatenate(payload_llr_list)
             else:
                 all_rx_llr = np.array([], dtype=np.float64)
 
             # 对齐 LLR 长度到编码比特数
-            expected_llr_len = len(tx_encoded)
-            if len(all_rx_llr) < expected_llr_len:
+            if len(all_rx_llr) < len(tx_encoded):
                 all_rx_llr = np.pad(all_rx_llr,
-                                     (0, expected_llr_len - len(all_rx_llr)))
-            elif len(all_rx_llr) > expected_llr_len:
-                all_rx_llr = all_rx_llr[:expected_llr_len]
+                                     (0, len(tx_encoded) - len(all_rx_llr)))
+            elif len(all_rx_llr) > len(tx_encoded):
+                all_rx_llr = all_rx_llr[:len(tx_encoded)]
 
             rx_decoded = self.decoder.decode_llr(all_rx_llr)
         else:
             # 硬判决路径（默认）
-            rx_bits_list = [qpsk_demodulate_hard(fsym) for fsym in rx_frames_sym]
-            if rx_bits_list:
-                all_rx_bits = np.concatenate(rx_bits_list)
-            else:
-                all_rx_bits = np.array([], dtype=np.uint8)
-
-            if len(all_rx_bits) < len(all_tx_bits):
-                all_rx_bits = np.pad(all_rx_bits,
-                                     (0, len(all_tx_bits) - len(all_rx_bits)))
-            elif len(all_rx_bits) > len(all_tx_bits):
-                all_rx_bits = all_rx_bits[:len(all_tx_bits)]
-
-            # 解帧
-            rx_frames_bits = self._reshape_to_frames(all_rx_bits)
-            rx_encoded, _sync_errs = self.unpacker.unpack_with_sync_check(
-                rx_frames_bits
-            )
-
             # 对齐编码比特长度
             if len(rx_encoded) < len(tx_encoded):
                 rx_encoded = np.pad(rx_encoded,
@@ -215,10 +239,12 @@ class WirelessPipeline:
         # BER
         ber, bit_errors = compute_ber(tx_scrambled, rx_decoded)
 
-        # FER
+        # FER（含同步错误帧）
         num_tx_frames = len(frames)
-        fer = compute_fer(frames, rx_frames_bits)
-        frame_errors_total = int(fer * num_tx_frames)
+        fer_content = compute_fer(frames, rx_frames_bits)
+        # compute_fer 已计入同步字损坏的帧（帧比特不匹配），sync_errs 仅作日志
+        frame_errors_total = int(round(fer_content * num_tx_frames))
+        fer = fer_content
 
         # 文本恢复率
         text_recovery = compute_text_recovery_rate(input_path, received_path)

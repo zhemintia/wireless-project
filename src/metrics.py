@@ -173,9 +173,10 @@ def plot_ber_curve(
         return
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    # semilogy 不支持 0 值，替换为一个极小的正值
+    # semilogy 不支持 0 值，用极小正值替代（图上标注为 BER < 1e-5）
     ber_plot = np.array(ber_values, dtype=np.float64)
-    ber_plot[ber_plot == 0] = 1e-6
+    zero_mask = ber_plot == 0
+    ber_plot[zero_mask] = 1e-6
     ax.semilogy(snr_values, ber_plot, 'o-', color='steelblue',
                 linewidth=1.5, markersize=5, label='Simulated BER')
 
