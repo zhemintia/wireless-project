@@ -12,25 +12,25 @@ from pathlib import Path
 @pytest.fixture
 def rng():
     """可复现的随机数生成器。"""
-    return np.random.RandomState(42)
+    return np.random.default_rng(42)
 
 
 @pytest.fixture
 def random_bits(rng):
     """生成 1024 个随机比特。"""
-    return rng.randint(0, 2, size=1024, dtype=np.uint8)
+    return rng.integers(0, 2, size=1024, dtype=np.uint8)
 
 
 @pytest.fixture
 def random_bits_short(rng):
     """生成 256 个随机比特。"""
-    return rng.randint(0, 2, size=256, dtype=np.uint8)
+    return rng.integers(0, 2, size=256, dtype=np.uint8)
 
 
 @pytest.fixture
 def random_bits_long(rng):
     """生成 10000 个随机比特（用于测试多帧场景）。"""
-    return rng.randint(0, 2, size=10000, dtype=np.uint8)
+    return rng.integers(0, 2, size=10000, dtype=np.uint8)
 
 
 @pytest.fixture

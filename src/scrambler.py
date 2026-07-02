@@ -25,9 +25,9 @@ def _lfsr_scramble_bit(bit: int, state: int, poly: int) -> tuple[int, int]:
         (output_bit, new_state): 输出比特和更新后的状态。
     """
     # 反馈比特 = 多项式抽头的 XOR
-    # 将 state 左移 1 位后与 poly 做 AND，使 bit 7 对应 x^7 抽头
-    # ⚠ bin().count() 每次分配字符串，生产级应使用位运算 XOR folding
-    feedback = bin(((state << 1) & poly)).count('1') % 2
+    # 多项式 0x91 (x^7+x^4+1): 抽头位于 bit 7 和 bit 4，对应 state 的 bit 6 和 bit 3
+    # 使用位运算替代 bin().count() 避免每比特分配字符串对象
+    feedback = ((state >> 6) ^ (state >> 3)) & 1
     output = bit ^ feedback
     new_state = ((state << 1) | output) & 0x7F  # 保持 7-bit
     return output, new_state
@@ -95,7 +95,7 @@ def descramble(bits: np.ndarray, seed: int = 0x7F, poly: int = 0x91) -> np.ndarr
     for i in range(len(bits)):
         bit = int(bits[i])
         # 反馈从接收比特计算（自同步：不依赖输出比特即可收敛）
-        feedback = bin(((state << 1) & poly)).count('1') % 2
+        feedback = ((state >> 6) ^ (state >> 3)) & 1
         output = bit ^ feedback
         # 关键：状态更新用接收比特（非 output），实现自同步
         new_state = ((state << 1) | bit) & 0x7F

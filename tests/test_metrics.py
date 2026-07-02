@@ -99,6 +99,8 @@ class TestComputeTextRecoveryRate:
             Path(recv).unlink(missing_ok=True)
 
     def test_missing_file(self):
+        import pytest
         from src.metrics import compute_text_recovery_rate
-        rate = compute_text_recovery_rate('nonexistent_abc.txt', 'nonexistent_def.txt')
-        assert rate == 0.0
+        # 原始文件不存在时应抛出 FileNotFoundError（而非返回 0.0 掩盖配置错误）
+        with pytest.raises(FileNotFoundError):
+            compute_text_recovery_rate('nonexistent_abc.txt', 'nonexistent_def.txt')

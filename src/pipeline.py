@@ -128,14 +128,17 @@ class WirelessPipeline:
         # 6. AWGN 信道
         rx_symbols = awgn_channel(tx_symbols, snr_db=snr_db, seed=seed)
 
-        # 7. 添加同步偏移
+        # 7. 添加同步偏移（模拟传输开始前的未知符号）
+        # 偏移噪声幅度设为 0.01（远低于 QPSK 信号功率 1.0），确保同步器
+        # 不会将噪声误检为帧起始，同时不影响后续帧的检测
+        _SYNC_OFFSET_NOISE_AMPLITUDE = 0.01
         if sync_offset > 0:
             rng_seed = (seed + 1) % (2**31)
             rng = np.random.default_rng(rng_seed)
             offset_noise = (
                 rng.standard_normal(sync_offset) +
                 1j * rng.standard_normal(sync_offset)
-            ) * 0.01
+            ) * _SYNC_OFFSET_NOISE_AMPLITUDE
             rx_symbols = np.concatenate([offset_noise, rx_symbols])
 
         # ==================== 接收机 ====================

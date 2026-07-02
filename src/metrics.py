@@ -77,9 +77,9 @@ def compute_text_recovery_rate(original_path: str, received_path: str) -> float:
     try:
         original = Path(original_path).read_text(encoding='utf-8')
     except FileNotFoundError:
-        return 0.0  # 文件不存在：Pipeline 配置错误
+        raise FileNotFoundError(f"原始文件不存在: {original_path}")
     except UnicodeDecodeError:
-        return 0.0  # 源文件编码损坏
+        return 0.0  # 源文件编码损坏（非 UTF-8 二进制文件）
 
     try:
         received = Path(received_path).read_text(encoding='utf-8')

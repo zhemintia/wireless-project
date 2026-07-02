@@ -32,6 +32,8 @@ def main():
     parser.add_argument('--snr-step', type=float, default=1.0, help='SNR 步长 (dB)')
     parser.add_argument('--seed', type=int, default=42, help='随机数种子')
     parser.add_argument('--trials', type=int, default=1, help='每个 SNR 点的试验次数')
+    parser.add_argument('--soft', action='store_true', default=False,
+                        help='使用软判决 LLR 译码（约 2dB 增益）')
     args = parser.parse_args()
 
     config = WirelessConfig()
@@ -61,9 +63,15 @@ def main():
                 output_dir=str(trial_dir),
                 snr_db=snr,
                 seed=args.seed + trial,
+                soft_decision=args.soft,
             )
-            bers.append(metrics['ber'])
-            fers.append(metrics['fer'])
+            # 同步失败时使用默认值
+            if metrics.get('sync_failed'):
+                bers.append(0.5)
+                fers.append(1.0)
+            else:
+                bers.append(metrics['ber'])
+                fers.append(metrics['fer'])
 
         avg_ber = np.mean(bers)
         avg_fer = np.mean(fers)

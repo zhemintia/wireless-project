@@ -64,7 +64,19 @@ def parse_args(argv=None):
         '--no-plot',
         action='store_false',
         dest='plot',
-        help='不生成图表',
+        help='不生成图表（默认会生成图表）',
+    )
+    parser.add_argument(
+        '--sync-threshold',
+        type=float,
+        default=None,
+        help='同步检测阈值因子 (0.0~1.0, 默认: 0.5, 越低越敏感)',
+    )
+    parser.add_argument(
+        '--constraint-length', '-k',
+        type=int,
+        default=None,
+        help='卷积码约束长度 (默认: 7)',
     )
     parser.add_argument(
         '--verbose', '-v',
@@ -85,6 +97,10 @@ def main(argv=None):
     config.default_snr_db = args.snr
     config.default_seed = args.seed
     config.sync_offset = args.sync_offset
+    if args.sync_threshold is not None:
+        config.sync_threshold_factor = args.sync_threshold
+    if args.constraint_length is not None:
+        config.constraint_length = args.constraint_length
 
     input_path = args.input
     output_dir = args.output_dir
@@ -118,8 +134,17 @@ def main(argv=None):
             sync_offset=args.sync_offset,
             soft_decision=args.soft,
         )
+    except FileNotFoundError as e:
+        print(f"错误: 文件未找到 — {e}", file=sys.stderr)
+        sys.exit(1)
+    except PermissionError as e:
+        print(f"错误: 权限不足 — {e}", file=sys.stderr)
+        sys.exit(1)
     except (ValueError, RuntimeError) as e:
-        print(f"错误: {e}")
+        print(f"错误: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"错误: 未预期的异常 — {type(e).__name__}: {e}", file=sys.stderr)
         sys.exit(1)
 
     # 输出结果

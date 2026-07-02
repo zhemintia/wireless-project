@@ -34,26 +34,11 @@ class ConvolutionalEncoder:
         self.num_outputs = len(generators)
 
     def _conv_encode_bit(self, state: int, bit: int) -> tuple[np.ndarray, int]:
-        """对单个比特编码。
-
-        Args:
-            state: 当前移位寄存器状态 (K-1 bits)。
-            bit: 输入比特 (0 或 1)。
-
-        Returns:
-            (output_bits, next_state): 输出比特和下一状态。
-        """
-        # 将输入比特移入状态寄存器
-        new_state = ((bit << (self.constraint_length - 1)) | state) >> 1
-
-        output = np.zeros(self.num_outputs, dtype=np.uint8)
-        for i, gen in enumerate(self.generators):
-            # 生成多项式与扩展状态做点积（XOR parity）
-            extended = (bit << (self.constraint_length - 1)) | state
-            parity = bin(extended & gen).count('1') % 2
-            output[i] = parity
-
-        return output, new_state
+        """对单个比特编码（委托给共享静态方法确保与 Decoder 逻辑一致）。"""
+        return ViterbiDecoder._encode_bit_static(
+            state, bit, self.constraint_length,
+            self.generators, self.num_outputs,
+        )
 
     def encode(self, bits: np.ndarray) -> np.ndarray:
         """卷积编码。
@@ -93,7 +78,7 @@ class ViterbiDecoder:
     """Viterbi 译码器。
 
     使用最大似然序列估计 (MLSE) 方法译码卷积码。
-    支持硬判决（汉明距离）和软判决（欧氏距离）。
+    支持硬判决（汉明距离）和软判决（欧氏距离/LLR 相关度量）。
 
     Attributes:
         constraint_length: 约束长度 K。
@@ -115,11 +100,34 @@ class ViterbiDecoder:
         # 预计算所有状态转移的输出
         self._output_table = self._build_output_table()
 
+    @staticmethod
+    def _encode_bit_static(state: int, bit: int, k: int, generators: tuple,
+                           num_outputs: int) -> tuple[np.ndarray, int]:
+        """静态编码逻辑 — Encoder 和 Decoder 共享的单一真相来源。
+
+        Args:
+            state: 当前移位寄存器状态 (K-1 bits)。
+            bit: 输入比特 (0 或 1)。
+            k: 约束长度。
+            generators: 生成多项式元组。
+            num_outputs: 输出分支数。
+
+        Returns:
+            (output_bits, next_state): 输出比特数组和下一状态。
+        """
+        new_state = ((bit << (k - 1)) | state) >> 1
+        output = np.zeros(num_outputs, dtype=np.uint8)
+        extended = (bit << (k - 1)) | state
+        for i, gen in enumerate(generators):
+            # 使用 int.bit_count() 替代 bin().count('1')，避免每比特分配字符串
+            parity = (extended & gen).bit_count() % 2
+            output[i] = parity
+        return output, new_state
+
     def _build_output_table(self) -> dict:
         """构建状态转移输出表。
 
-        ⚠ 与 ConvolutionalEncoder._conv_encode_bit 编码逻辑重复。
-        修改生成多项式时需同步更新两处。
+        使用共享的 _encode_bit_static 静态方法，确保与 Encoder 逻辑一致。
 
         Returns:
             字典 {(state, bit): (output_bits, next_state)}。
@@ -127,14 +135,91 @@ class ViterbiDecoder:
         table = {}
         for state in range(self._num_states):
             for bit in (0, 1):
-                new_state = ((bit << (self.constraint_length - 1)) | state) >> 1
-                output = np.zeros(self.num_outputs, dtype=np.uint8)
-                for i, gen in enumerate(self.generators):
-                    extended = (bit << (self.constraint_length - 1)) | state
-                    parity = bin(extended & gen).count('1') % 2
-                    output[i] = parity
-                table[(state, bit)] = (output, new_state)
+                table[(state, bit)] = self._encode_bit_static(
+                    state, bit, self.constraint_length,
+                    self.generators, self.num_outputs,
+                )
         return table
+
+    def _validate_input(self, data: np.ndarray, name: str) -> int:
+        """验证输入长度并返回分支数。"""
+        if len(data) == 0:
+            return 0
+        if len(data) % self.num_outputs != 0:
+            raise ValueError(
+                f"{name} length ({len(data)}) "
+                f"not a multiple of num_outputs ({self.num_outputs})"
+            )
+        return len(data) // self.num_outputs
+
+    def _acs_viterbi(self, num_branches: int, metric_fn) -> tuple:
+        """ACS (Add-Compare-Select) Viterbi 核心循环。
+
+        所有译码变体 (hard/soft/LLR) 共享相同的 ACS 结构，
+        仅分支度量计算方式不同。
+
+        Args:
+            num_branches: 分支数（编码比特数 / num_outputs）。
+            metric_fn: callable(t, state, bit, expected, next_state) -> float
+                       返回从 state 经过 bit 到达 next_state 的分支度量。
+
+        Returns:
+            (survivor_prev, path_metric): 幸存前一状态数组和最终路径度量。
+        """
+        path_metric = np.full((num_branches + 1, self._num_states), np.inf)
+        path_metric[0, 0] = 0.0
+
+        survivor_prev = np.full((num_branches, self._num_states), -1, dtype=np.int32)
+
+        for t in range(num_branches):
+            for state in range(self._num_states):
+                if np.isinf(path_metric[t, state]):
+                    continue
+
+                for bit in (0, 1):
+                    expected, next_state = self._output_table[(state, bit)]
+                    branch_metric = metric_fn(t, state, bit, expected, next_state)
+                    new_metric = path_metric[t, state] + branch_metric
+
+                    if new_metric < path_metric[t + 1, next_state]:
+                        path_metric[t + 1, next_state] = new_metric
+                        survivor_prev[t, next_state] = state
+
+        return survivor_prev, path_metric
+
+    def _traceback(self, survivor_prev: np.ndarray, path_metric: np.ndarray,
+                   num_branches: int) -> np.ndarray:
+        """Viterbi 回溯 — 从终态反推最优路径。
+
+        注意: 当前帧大小 (~300 分支) 下路径度量无需归一化。
+        若帧大小增加到 >10^4 级别，应考虑定期减去最小度量以防浮点溢出。
+
+        Args:
+            survivor_prev: 幸存前一状态数组。
+            path_metric: 路径度量矩阵。
+            num_branches: 总分支数（含 tail bits）。
+
+        Returns:
+            译码后的信息比特序列 (uint8 ndarray)。
+        """
+        info_length = num_branches - self._tail_bits
+        if info_length <= 0:
+            return np.array([], dtype=np.uint8)
+
+        decoded = np.zeros(info_length, dtype=np.uint8)
+        best_state = int(np.argmin(path_metric[-1]))
+
+        for t in range(num_branches - 1, -1, -1):
+            prev_state = survivor_prev[t, best_state]
+            # 从 prev_state 转移到 best_state 的输入比特 = best_state 的 MSB
+            bit = (best_state >> (self.constraint_length - 2)) & 1
+            if t < info_length:
+                decoded[t] = bit
+            best_state = prev_state
+            if prev_state < 0:  # 不应发生，防御性编程
+                break
+
+        return decoded
 
     def decode_hard(self, coded_bits: np.ndarray) -> np.ndarray:
         """硬判决 Viterbi 译码（汉明距离度量）。
@@ -145,59 +230,18 @@ class ViterbiDecoder:
         Returns:
             译码后的信息比特序列 (uint8 ndarray)。
         """
-        if len(coded_bits) == 0:
+        num_branches = self._validate_input(coded_bits, "coded_bits")
+        if num_branches == 0:
             return np.array([], dtype=np.uint8)
 
-        if len(coded_bits) % self.num_outputs != 0:
-            raise ValueError(
-                f"coded_bits length ({len(coded_bits)}) "
-                f"not a multiple of num_outputs ({self.num_outputs})"
-            )
-        num_branches = len(coded_bits) // self.num_outputs
+        # 预切片所有分支比特，避免在 metric_fn 中重复切片
+        all_branches = coded_bits.reshape(num_branches, self.num_outputs)
 
-        # 路径度量: (num_branches + 1, num_states), 初始化为无穷大
-        path_metric = np.full((num_branches + 1, self._num_states), np.inf)
-        path_metric[0, 0] = 0.0
+        def metric_fn(t, state, bit, expected, next_state):
+            return float(np.sum(all_branches[t] != expected))
 
-        # 幸存前一状态: (num_branches, num_states) — 记录到达 next_state 的来源 state
-        survivor_prev = np.full((num_branches, self._num_states), -1, dtype=np.int32)
-
-        for t in range(num_branches):
-            branch_bits = coded_bits[t * self.num_outputs: (t + 1) * self.num_outputs]
-
-            for state in range(self._num_states):
-                if np.isinf(path_metric[t, state]):
-                    continue
-
-                for bit in (0, 1):
-                    expected, next_state = self._output_table[(state, bit)]
-                    dist = np.sum(branch_bits != expected)
-                    new_metric = path_metric[t, state] + dist
-
-                    if new_metric < path_metric[t + 1, next_state]:
-                        path_metric[t + 1, next_state] = new_metric
-                        survivor_prev[t, next_state] = state
-
-        # 回溯
-        info_length = num_branches - self._tail_bits
-        if info_length <= 0:
-            return np.array([], dtype=np.uint8)
-
-        decoded = np.zeros(info_length, dtype=np.uint8)
-
-        # 从最小度量终态回溯（零尾终止时理论上应为状态 0）
-        best_state = int(np.argmin(path_metric[-1]))
-        for t in range(num_branches - 1, -1, -1):
-            prev_state = survivor_prev[t, best_state]
-            # 从 prev_state 转移到 best_state 的输入比特
-            bit = (best_state >> (self.constraint_length - 2)) & 1
-            if t < info_length:
-                decoded[t] = bit
-            best_state = prev_state
-            if prev_state < 0:  # 不应发生
-                break
-
-        return decoded
+        survivor_prev, path_metric = self._acs_viterbi(num_branches, metric_fn)
+        return self._traceback(survivor_prev, path_metric, num_branches)
 
     def decode_soft(self, soft_bits: np.ndarray) -> np.ndarray:
         """软判决 Viterbi 译码（欧氏距离度量）。
@@ -208,56 +252,18 @@ class ViterbiDecoder:
         Returns:
             译码后的信息比特序列 (uint8 ndarray)。
         """
-        if len(soft_bits) == 0:
+        num_branches = self._validate_input(soft_bits, "soft_bits")
+        if num_branches == 0:
             return np.array([], dtype=np.uint8)
 
-        if len(soft_bits) % self.num_outputs != 0:
-            raise ValueError(
-                f"soft_bits length ({len(soft_bits)}) "
-                f"not a multiple of num_outputs ({self.num_outputs})"
-            )
-        num_branches = len(soft_bits) // self.num_outputs
+        all_branches = soft_bits.reshape(num_branches, self.num_outputs)
 
-        path_metric = np.full((num_branches + 1, self._num_states), np.inf)
-        path_metric[0, 0] = 0.0
+        def metric_fn(t, state, bit, expected, next_state):
+            expected_soft = 1.0 - 2.0 * expected.astype(np.float64)
+            return float(np.sum((all_branches[t] - expected_soft) ** 2))
 
-        survivor_prev = np.full((num_branches, self._num_states), -1, dtype=np.int32)
-
-        for t in range(num_branches):
-            branch_soft = soft_bits[t * self.num_outputs: (t + 1) * self.num_outputs]
-
-            for state in range(self._num_states):
-                if np.isinf(path_metric[t, state]):
-                    continue
-
-                for bit in (0, 1):
-                    expected, next_state = self._output_table[(state, bit)]
-                    expected_soft_val = 1.0 - 2.0 * expected.astype(np.float64)
-                    dist = np.sum((branch_soft - expected_soft_val) ** 2)
-                    new_metric = path_metric[t, state] + dist
-
-                    if new_metric < path_metric[t + 1, next_state]:
-                        path_metric[t + 1, next_state] = new_metric
-                        survivor_prev[t, next_state] = state
-
-        info_length = num_branches - self._tail_bits
-        if info_length <= 0:
-            return np.array([], dtype=np.uint8)
-
-        decoded = np.zeros(info_length, dtype=np.uint8)
-        # 从最小度量终态回溯（零尾终止时理论上应为状态 0，但有噪声时取 ML 估计）
-        best_state = int(np.argmin(path_metric[-1]))
-
-        for t in range(num_branches - 1, -1, -1):
-            prev_state = survivor_prev[t, best_state]
-            bit = (best_state >> (self.constraint_length - 2)) & 1
-            if t < info_length:
-                decoded[t] = bit
-            best_state = prev_state
-            if prev_state < 0:
-                break
-
-        return decoded
+        survivor_prev, path_metric = self._acs_viterbi(num_branches, metric_fn)
+        return self._traceback(survivor_prev, path_metric, num_branches)
 
     def decode_llr(self, llr_values: np.ndarray) -> np.ndarray:
         """LLR 输入 Viterbi 译码（相关度量 / ML 度量）。
@@ -271,56 +277,17 @@ class ViterbiDecoder:
         Returns:
             译码后的信息比特序列 (uint8 ndarray)。
         """
-        if len(llr_values) == 0:
+        num_branches = self._validate_input(llr_values, "llr_values")
+        if num_branches == 0:
             return np.array([], dtype=np.uint8)
 
-        if len(llr_values) % self.num_outputs != 0:
-            raise ValueError(
-                f"llr_values length ({len(llr_values)}) "
-                f"not a multiple of num_outputs ({self.num_outputs})"
-            )
-        num_branches = len(llr_values) // self.num_outputs
+        all_branches = llr_values.reshape(num_branches, self.num_outputs)
 
-        path_metric = np.full((num_branches + 1, self._num_states), np.inf)
-        path_metric[0, 0] = 0.0
+        def metric_fn(t, state, bit, expected, next_state):
+            correlation = float(np.sum(
+                all_branches[t] * (1.0 - 2.0 * expected.astype(np.float64))
+            ))
+            return -correlation
 
-        survivor_prev = np.full((num_branches, self._num_states), -1, dtype=np.int32)
-
-        for t in range(num_branches):
-            llr_branch = llr_values[t * self.num_outputs:
-                                    (t + 1) * self.num_outputs]
-
-            for state in range(self._num_states):
-                if np.isinf(path_metric[t, state]):
-                    continue
-
-                for bit in (0, 1):
-                    expected, next_state = self._output_table[(state, bit)]
-                    # 相关度量: minimize -sum(LLR[i] * (1 - 2*expected[i]))
-                    correlation = np.sum(
-                        llr_branch * (1.0 - 2.0 * expected.astype(np.float64))
-                    )
-                    branch_metric = -correlation
-                    new_metric = path_metric[t, state] + branch_metric
-
-                    if new_metric < path_metric[t + 1, next_state]:
-                        path_metric[t + 1, next_state] = new_metric
-                        survivor_prev[t, next_state] = state
-
-        info_length = num_branches - self._tail_bits
-        if info_length <= 0:
-            return np.array([], dtype=np.uint8)
-
-        decoded = np.zeros(info_length, dtype=np.uint8)
-        best_state = int(np.argmin(path_metric[-1]))
-
-        for t in range(num_branches - 1, -1, -1):
-            prev_state = survivor_prev[t, best_state]
-            bit = (best_state >> (self.constraint_length - 2)) & 1
-            if t < info_length:
-                decoded[t] = bit
-            best_state = prev_state
-            if prev_state < 0:
-                break
-
-        return decoded
+        survivor_prev, path_metric = self._acs_viterbi(num_branches, metric_fn)
+        return self._traceback(survivor_prev, path_metric, num_branches)

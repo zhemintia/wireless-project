@@ -31,6 +31,8 @@ def snr_db_to_noise_var(snr_db: float) -> float:
     Returns:
         复噪声方差 σ²（每复维）。
     """
+    if not np.isfinite(snr_db):
+        raise ValueError(f"snr_db must be finite, got {snr_db}")
     snr_linear = 10 ** (snr_db / 10.0)
     return 1.0 / snr_linear
 

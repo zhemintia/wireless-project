@@ -53,11 +53,14 @@ ConvolutionalEncoder(K=7, generators=(171₈, 133₈))
 ViterbiDecoder(K=7, generators=(171₈, 133₈))
     .decode_hard(coded_bits) → decoded_bits
     .decode_soft(soft_values) → decoded_bits
+    .decode_llr(llr_values) → decoded_bits
 ```
 - 码率 1/2，零尾比特终止
 - 硬判决：汉明距离度量
 - 软判决：欧氏距离度量（BPSK 映射 0→+1, 1→-1）
+- LLR 译码：直接接受 QPSK 软解调 LLR 输入，使用相关度量（~2dB 额外增益 vs 软判决）
 - 回溯：存储幸存前一状态，确保正确路径恢复
+- 编码逻辑：Encoder 和 Decoder 共享静态方法 `_encode_bit_static()`，确保单一真相来源
 
 ### 2.4 帧封装 (`frame.py`)
 ```
@@ -103,7 +106,8 @@ FrameSynchronizer(sync_word, frame_length_symbols, threshold_factor=0.5)
 ### 2.8 Pipeline 编排 (`pipeline.py`)
 ```
 WirelessPipeline(config)
-    .run(input_path, output_dir, snr_db, seed, sync_offset) → metrics: dict
+    .run(input_path, output_dir, snr_db, seed, sync_offset,
+         soft_decision=False) → metrics: dict
 ```
 - 串联完整发射→信道→接收链路
 - 输出：received.txt, metrics.json
@@ -138,15 +142,18 @@ WirelessPipeline(config)
 
 ## 4. 测试策略
 
-### 4.1 单元测试 (80 个测试用例)
+### 4.1 单元测试 (97 个测试用例)
 - 每个模块独立测试，遵循 TDD 红-绿-重构
 - 覆盖：正常输入、边界条件（空输入、单比特、超大输入）、错误输入
+- LLR 符号正确性、噪声方差影响等算法正确性验证
 
-### 4.2 集成测试 (7 个测试用例)
+### 4.2 集成测试 (10 个测试用例)
 - 端到端无噪声：100% 恢复
 - 高/低 SNR：BER 单调性验证
 - 输出文件完整性检查
 - Seed 可复现性验证
+- 软判决路径验证
+- 同步失败低 SNR 鲁棒性测试
 
 ### 4.3 CLI 测试 (6 个测试用例)
 - 参数解析正确性
@@ -164,6 +171,7 @@ d:/class/wireless/
 ├── CONTEXT.md             # 领域语言词汇表
 ├── Test.txt               # 测试输入文件
 ├── requirements.txt       # Python 依赖
+├── requirements-dev.txt   # 开发依赖 (pytest)
 ├── src/                   # 源代码
 │   ├── cli.py             # CLI 入口
 │   ├── config.py          # 全局配置
@@ -176,7 +184,7 @@ d:/class/wireless/
 │   ├── awgn.py            # AWGN 信道
 │   ├── synchronizer.py    # 帧同步
 │   └── metrics.py         # 指标与可视化
-├── tests/                 # 测试
+├── tests/                 # 测试 (113 个测试用例)
 ├── output/                # 输出目录
 └── scripts/
     └── sweep_snr.py       # SNR 扫描

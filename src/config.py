@@ -54,5 +54,22 @@ class WirelessConfig:
     sync_threshold_factor: float = 0.5  # 检测阈值 = factor * max(correlation)
 
 
+    def __post_init__(self):
+        """验证配置参数合法性。"""
+        if self.constraint_length < 2:
+            raise ValueError(f"constraint_length must be >= 2, got {self.constraint_length}")
+        if self.frame_payload_bits <= 0:
+            raise ValueError(f"frame_payload_bits must be > 0, got {self.frame_payload_bits}")
+        if not (0.0 < self.channel_code_rate <= 1.0):
+            raise ValueError(f"channel_code_rate must be in (0, 1], got {self.channel_code_rate}")
+        if len(self.generator_polynomials) == 0:
+            raise ValueError("generator_polynomials must not be empty")
+        if len(self.sync_word) == 0:
+            raise ValueError("sync_word must not be empty")
+        if not (0.0 <= self.sync_threshold_factor <= 1.0):
+            raise ValueError(
+                f"sync_threshold_factor must be in [0, 1], got {self.sync_threshold_factor}"
+            )
+
 # 全局默认配置实例
 default_config = WirelessConfig()
