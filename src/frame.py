@@ -123,7 +123,6 @@ class FrameUnpacker:
             frames = [frames]
 
         all_bits = []
-        unpacked_total = 0
 
         # 从最后一帧获取总比特数（第一帧可能不包含总数信息）
         # 累积所有数据，最后截断到正确长度
@@ -148,7 +147,6 @@ class FrameUnpacker:
             # 读取载荷
             payload = frame[self._header_bits:self._header_bits + length_val]
             all_bits.append(payload)
-            unpacked_total += length_val
 
         if not all_bits:
             return np.array([], dtype=np.uint8)

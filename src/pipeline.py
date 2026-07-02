@@ -13,8 +13,8 @@ from src.source_coder import text_to_bits, bits_to_text
 from src.scrambler import scramble, descramble
 from src.channel_coder import ConvolutionalEncoder, ViterbiDecoder
 from src.frame import FramePacker, FrameUnpacker
-from src.qpsk import qpsk_modulate, qpsk_demodulate_hard
-from src.awgn import awgn_channel
+from src.qpsk import qpsk_modulate, qpsk_demodulate_hard, qpsk_demodulate_soft
+from src.awgn import awgn_channel, snr_db_to_noise_var
 from src.synchronizer import FrameSynchronizer
 from src.metrics import compute_ber, compute_fer, compute_text_recovery_rate
 
@@ -72,6 +72,7 @@ class WirelessPipeline:
         snr_db: float = None,
         seed: int = None,
         sync_offset: int = None,
+        soft_decision: bool = False,
     ) -> dict:
         """运行完整的端到端仿真。
 
@@ -81,6 +82,7 @@ class WirelessPipeline:
             snr_db: Es/N0 信噪比 (dB)。None 时使用默认配置。
             seed: 随机数种子。None 时使用默认配置。
             sync_offset: 同步偏移（符号数）。None 时使用默认配置。
+            soft_decision: True 时使用软解调+LLR译码（~2dB 增益）。
 
         Returns:
             metrics 字典，包含 BER、FER、text_recovery_rate 等。
@@ -99,7 +101,7 @@ class WirelessPipeline:
         tx_bits, metadata = text_to_bits(input_path)
 
         # 2. 加扰
-        tx_scrambled = scramble(tx_bits, seed=(seed & 0x7F))
+        tx_scrambled = scramble(tx_bits, seed=seed)
 
         # 空输入：直接复制文件
         if len(tx_bits) == 0:
@@ -129,9 +131,10 @@ class WirelessPipeline:
         # 7. 添加同步偏移
         if sync_offset > 0:
             rng_seed = (seed + 1) % (2**31)
-            rng = np.random.RandomState(rng_seed)
+            rng = np.random.default_rng(rng_seed)
             offset_noise = (
-                rng.randn(sync_offset) + 1j * rng.randn(sync_offset)
+                rng.standard_normal(sync_offset) +
+                1j * rng.standard_normal(sync_offset)
             ) * 0.01
             rx_symbols = np.concatenate([offset_noise, rx_symbols])
 
@@ -149,33 +152,59 @@ class WirelessPipeline:
                 'snr_db': snr_db, 'sync_failed': True,
             }
 
-        # 9. QPSK 硬解调各帧符号为比特（concatenate 避免 ragged array 警告）
-        rx_bits_list = [qpsk_demodulate_hard(fsym) for fsym in rx_frames_sym]
-        if rx_bits_list:
-            all_rx_bits = np.concatenate(rx_bits_list)
+        # 9. QPSK 解调 + 解帧 + 信道译码
+        if soft_decision:
+            # 软判决路径：QPSK 软解调 (LLR) → Viterbi LLR 译码（~2dB 增益）
+            noise_var_real = snr_db_to_noise_var(snr_db) / 2.0
+            rx_bits_list = [
+                qpsk_demodulate_soft(fsym, noise_var=noise_var_real)
+                for fsym in rx_frames_sym
+            ]
+            if rx_bits_list:
+                all_rx_llr = np.concatenate(rx_bits_list)
+            else:
+                all_rx_llr = np.array([], dtype=np.float64)
+
+            # 对齐 LLR 长度到编码比特数
+            expected_llr_len = len(tx_encoded)
+            if len(all_rx_llr) < expected_llr_len:
+                all_rx_llr = np.pad(all_rx_llr,
+                                     (0, expected_llr_len - len(all_rx_llr)))
+            elif len(all_rx_llr) > expected_llr_len:
+                all_rx_llr = all_rx_llr[:expected_llr_len]
+
+            rx_decoded = self.decoder.decode_llr(all_rx_llr)
         else:
-            all_rx_bits = np.array([], dtype=np.uint8)
+            # 硬判决路径（默认）
+            rx_bits_list = [qpsk_demodulate_hard(fsym) for fsym in rx_frames_sym]
+            if rx_bits_list:
+                all_rx_bits = np.concatenate(rx_bits_list)
+            else:
+                all_rx_bits = np.array([], dtype=np.uint8)
 
-        if len(all_rx_bits) < len(all_tx_bits):
-            all_rx_bits = np.pad(all_rx_bits, (0, len(all_tx_bits) - len(all_rx_bits)))
-        elif len(all_rx_bits) > len(all_tx_bits):
-            all_rx_bits = all_rx_bits[:len(all_tx_bits)]
+            if len(all_rx_bits) < len(all_tx_bits):
+                all_rx_bits = np.pad(all_rx_bits,
+                                     (0, len(all_tx_bits) - len(all_rx_bits)))
+            elif len(all_rx_bits) > len(all_tx_bits):
+                all_rx_bits = all_rx_bits[:len(all_tx_bits)]
 
-        # 解帧
-        rx_frames_bits = self._reshape_to_frames(all_rx_bits)
-        rx_encoded = self.unpacker.unpack(rx_frames_bits)
+            # 解帧
+            rx_frames_bits = self._reshape_to_frames(all_rx_bits)
+            rx_encoded, _sync_errs = self.unpacker.unpack_with_sync_check(
+                rx_frames_bits
+            )
 
-        # 对齐编码比特长度
-        if len(rx_encoded) < len(tx_encoded):
-            rx_encoded = np.pad(rx_encoded, (0, len(tx_encoded) - len(rx_encoded)))
-        elif len(rx_encoded) > len(tx_encoded):
-            rx_encoded = rx_encoded[:len(tx_encoded)]
+            # 对齐编码比特长度
+            if len(rx_encoded) < len(tx_encoded):
+                rx_encoded = np.pad(rx_encoded,
+                                    (0, len(tx_encoded) - len(rx_encoded)))
+            elif len(rx_encoded) > len(tx_encoded):
+                rx_encoded = rx_encoded[:len(tx_encoded)]
 
-        # 11. 信道译码
-        rx_decoded = self.decoder.decode_hard(rx_encoded)
+            rx_decoded = self.decoder.decode_hard(rx_encoded)
 
         # 12. 解扰
-        rx_descrambled = descramble(rx_decoded, seed=(seed & 0x7F))
+        rx_descrambled = descramble(rx_decoded, seed=seed)
 
         # 13. 信源解码
         received_path = str(out_path / 'received.txt')

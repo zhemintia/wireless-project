@@ -33,6 +33,10 @@ def qpsk_modulate(bits: np.ndarray) -> np.ndarray:
     if num_symbols == 0:
         return np.array([], dtype=np.complex128)
 
+    if len(bits) % 2 != 0:
+        import warnings
+        warnings.warn(f"Dropping last bit from odd-length input ({len(bits)} bits).")
+
     # 截断为偶数长度（丢弃最后一个奇数比特）
     even_bits = bits[:num_symbols * 2]
 

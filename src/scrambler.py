@@ -36,6 +36,20 @@ def _lfsr_scramble_bit(bit: int, state: int, poly: int) -> tuple[int, int]:
 def scramble(bits: np.ndarray, seed: int = 0x7F, poly: int = 0x91) -> np.ndarray:
     """加扰器：对比特序列进行加扰。
 
+    Args:
+        bits: 输入比特序列 (uint8 ndarray)。
+        seed: LFSR 初始状态。自动取低 7 位 (seed & 0x7F)。
+        poly: 生成多项式（默认 0x91 = x⁷+x⁴+1）。
+
+    Returns:
+        加扰后的比特序列 (uint8 ndarray)。
+    """
+    seed = seed & 0x7F  # LFSR 为 7-bit，仅取低 7 位
+    return _scramble_impl(bits, seed, poly)
+
+def _scramble_impl(bits: np.ndarray, seed: int, poly: int) -> np.ndarray:
+    """加扰器：对比特序列进行加扰。
+
     使用自同步扰码方式，将每个输入比特与 LFSR 反馈比特 XOR。
 
     Args:
@@ -63,22 +77,15 @@ def scramble(bits: np.ndarray, seed: int = 0x7F, poly: int = 0x91) -> np.ndarray
 def descramble(bits: np.ndarray, seed: int = 0x7F, poly: int = 0x91) -> np.ndarray:
     """解扰器：对比特序列进行解扰。
 
-    自同步解扰：使用与加扰器完全相同的 LFSR 结构，但状态更新使用**接收比特**
-    而非输出比特。这是自同步的关键 —— 即使初始状态错误，经过最多 K=7 个
-    比特后解扰器自动收敛到正确状态。
-
-    ⚠ 与 scramble() 的区别：
-       scramble:   new_state = ((state << 1) | output) & 0x7F
-       descramble: new_state = ((state << 1) | bit) & 0x7F   ← 用接收比特！
-
     Args:
         bits: 加扰后的比特序列 (uint8 ndarray)。
-        seed: LFSR 初始状态（默认 0x7F）。
+        seed: LFSR 初始状态。自动取低 7 位 (seed & 0x7F)。
         poly: 生成多项式（与加扰器相同）。
 
     Returns:
         解扰后的比特序列 (uint8 ndarray)。
     """
+    seed = seed & 0x7F  # LFSR 为 7-bit，仅取低 7 位
     if len(bits) == 0:
         return np.array([], dtype=np.uint8)
 

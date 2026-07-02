@@ -82,9 +82,10 @@ def awgn_channel(
     std_per_dim = np.sqrt(noise_var / 2.0)
 
     # 生成复高斯噪声
-    rng = np.random.RandomState(seed)
+    rng = np.random.default_rng(seed)
     noise = std_per_dim * (
-        rng.randn(len(symbols)) + 1j * rng.randn(len(symbols))
+        rng.standard_normal(len(symbols)) +
+        1j * rng.standard_normal(len(symbols))
     )
 
     return symbols + noise

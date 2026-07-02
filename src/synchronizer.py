@@ -138,6 +138,7 @@ class FrameSynchronizer:
                 while i < len(correlation) - 1 and correlation[i + 1] <= correlation[i]:
                     i += 1
                 peaks.append((local_max_idx, local_max))
+                continue  # 已在下降沿末尾，跳过外层 i+=1 避免跳过紧邻峰值
             i += 1
 
         if not peaks:
